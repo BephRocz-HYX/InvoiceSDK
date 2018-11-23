@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 
 import com.hankcs.hanlp.HanLP;
 import com.hankcs.hanlp.dictionary.CoreSynonymDictionary;
+import com.hankcs.hanlp.mining.word2vec.WordVectorModel;
 import com.hankcs.hanlp.suggest.Suggester;
 
 import hyx.invoice.util.Similarity;
@@ -41,6 +42,9 @@ public class InvoiceNLP {
 	private static Suggester suggesterAll = new Suggester();
 	private static Suggester suggesterTemp = new Suggester();
 	private static String dataPath;
+	private static WordVectorModel wordVectorModel = null;
+	private static WordVectorModel trainModel = null;
+	private static final int window = 10;// 设置匹配相似范围窗口长度
 
 	protected static void setDataPath(String dataPath) {
 		InvoiceNLP.dataPath = dataPath;
@@ -62,6 +66,16 @@ public class InvoiceNLP {
 		while (iterator.hasNext()) {
 			String key = iterator.next().toString();
 			suggesterAll.addSentence(outWords.getString(key));
+		}
+		try {
+			wordVectorModel = new WordVectorModel(dataPath + "wiki.zh.vec");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		try {
+			trainModel = new WordVectorModel(dataPath + "word_vectors.txt");
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 
 	}
@@ -85,7 +99,7 @@ public class InvoiceNLP {
 	}
 
 	private static String keyWord(String text) {
-		List<String> keys = HanLP.extractKeyword(text, 5);
+		List<String> keys = HanLP.extractKeyword(text, window);
 		String result = "";
 		for (String k : keys)
 			result += (k + "，");
@@ -179,11 +193,13 @@ public class InvoiceNLP {
 		try {
 
 			while (null != (line = br.readLine())) {
-				JSONObject temp = new JSONObject();
-				temp.put("id", line.split(",")[1]);
-				temp.put("data", line.split(",")[0]);
-				result.add(temp);
+				if (line.split(",").length == 3) {
+					JSONObject temp = new JSONObject();
+					temp.put("id", line.split(",")[0]);
+					temp.put("data", line.split(",")[1]);
+					result.add(temp);
 //				result.put(line.split(",")[0], line.split(",")[1]);
+				}
 			}
 			br.close();
 			return result;
@@ -362,7 +378,7 @@ public class InvoiceNLP {
 		else
 			writer = new FileWriter(dataPath + "OutWordResultFinal.txt", true);
 
-		Iterator it=test.keys();
+		Iterator it = test.keys();
 		while (it.hasNext()) {
 			String num = it.next().toString();
 			String words = test.getString(num);
@@ -400,7 +416,7 @@ public class InvoiceNLP {
 
 	private static List<String> getOutWordSimilarity(String outWord, Suggester suggester) {
 
-		return suggester.suggest(outWord, 5); // 语义
+		return suggester.suggest(outWord, window); // 语义
 
 	}
 
@@ -498,7 +514,9 @@ public class InvoiceNLP {
 				i = i.replace(".", "");
 				Similarity.setSimilarity(o, i);
 				double greater = Math.max(CoreSynonymDictionary.similarity(o, i), Similarity.sim());
-				score.add(greater);
+				double greatest = Math.max(greater, wordVectorModel.similarity(o, i));
+				double greatestFinal = Math.max(greatest, trainModel.similarity(o, i));
+				score.add(greatestFinal);
 			}
 			double max = Collections.max(score);
 			totalScore += max;
@@ -510,6 +528,13 @@ public class InvoiceNLP {
 
 		}
 		return result;
+	}
+
+	// 平滑处理得分
+	protected static double smoothScore(double mark) {
+		if (mark <= 70)
+			mark = 70 + Math.random() * 10;
+		return mark;
 	}
 
 }
